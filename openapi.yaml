@@ -1,0 +1,279 @@
+openapi: 3.0.3
+info:
+  title: Callback Server
+  version: 1.0.0
+  description: |
+    Receptor genérico de eventos. Solo confirma una recepción después del commit.
+    No ejecuta ni envía callbacks. Todos los clientes autenticados comparten acceso:
+    source es una etiqueta, no una frontera de autorización multitenant.
+    En producción utilizar HTTPS. Límite del cuerpo: 1048576 bytes.
+    Los timestamps se normalizan a microsegundos.
+servers:
+  - url: http://localhost:8080
+    description: Desarrollo local; usar HTTPS en producción.
+security:
+  - serviceBasic: []
+paths:
+  /api/v1/callbacks/{source}:
+    post:
+      operationId: receiveCallback
+      summary: Recibir un evento de forma idempotente
+      description: |
+        Clave de idempotencia: source + eventId. El emisor debe conservar eventId
+        entre reintentos. Se comparan type, occurredAt y payload mediante igualdad
+        JSONB (el orden de propiedades no importa). No es deduplicación por bytes.
+        Ante errores de red o 503, reintentar el mismo evento con backoff y jitter.
+      parameters:
+        - $ref: '#/components/parameters/SourcePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewEvent'
+            example:
+              eventId: payment-001
+              type: payment.created
+              occurredAt: '2026-11-10T03:00:00Z'
+              payload:
+                paymentId: pay-123
+                amount: 15000
+                currency: COP
+      responses:
+        '201':
+          description: Evento nuevo persistido
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Ruta para consultar el evento.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        '200':
+          description: Reintento idéntico; devuelve el evento original con duplicate=true.
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Mismo source y eventId con contenido diferente.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: Cuerpo superior a 1 MiB.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '415':
+          description: Se requiere application/json.
+        '503':
+          description: No se pudo confirmar persistencia. Reintentar con el mismo eventId.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+                example: '5'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/events/{id}:
+    get:
+      operationId: getEvent
+      summary: Consultar un evento por su UUID interno
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Evento almacenado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Evento no encontrado.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      summary: Listado por fecha de recepción descendente, con UUID como desempate
+      description: |
+        Paginación por offset para una primera versión. No proporciona un snapshot
+        estable entre peticiones concurrentes. Para históricos grandes usar cursores.
+      parameters:
+        - name: source
+          in: query
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        - name: type
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Página sin COUNT global; hasNext indica si hay más resultados.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, size, hasNext]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+                  page:
+                    type: integer
+                  size:
+                    type: integer
+                  hasNext:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /actuator/health:
+    get:
+      operationId: health
+      summary: Salud pública sin detalles internos
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable.
+        '503':
+          description: Servicio no saludable.
+components:
+  securitySchemes:
+    serviceBasic:
+      type: http
+      scheme: basic
+      description: Cuenta de servicio por variables de entorno; solo sobre HTTPS en producción.
+  parameters:
+    SourcePath:
+      name: source
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+  responses:
+    BadRequest:
+      description: JSON, campos o parámetros inválidos.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Autenticación ausente o inválida.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    NewEvent:
+      type: object
+      required: [eventId, type, occurredAt, payload]
+      properties:
+        eventId:
+          type: string
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'
+        type:
+          type: string
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        occurredAt:
+          type: string
+          format: date-time
+          description: Fecha de origen entre los años 0001 y 9999; precisión de microsegundos.
+        payload:
+          type: object
+          additionalProperties: true
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/NewEvent'
+        - type: object
+          required: [id, source, receivedAt]
+          properties:
+            id:
+              type: string
+              format: uuid
+            source:
+              type: string
+            receivedAt:
+              type: string
+              format: date-time
+    Receipt:
+      type: object
+      required: [event, duplicate]
+      properties:
+        event:
+          $ref: '#/components/schemas/Event'
+        duplicate:
+          type: boolean
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string

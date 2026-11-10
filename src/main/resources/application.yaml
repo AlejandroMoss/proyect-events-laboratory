@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: callback-server
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/callbacks}
+    username: ${DB_USERNAME:callbacks}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+  tomcat:
+    connection-timeout: 10s
+    max-http-form-post-size: 1MB
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+callbacks:
+  security:
+    username: ${CALLBACK_USERNAME}
+    password: ${CALLBACK_PASSWORD}

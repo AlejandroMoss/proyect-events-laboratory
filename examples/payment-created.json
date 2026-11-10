@@ -1,0 +1,10 @@
+{
+  "eventId": "payment-001",
+  "type": "payment.created",
+  "occurredAt": "2026-11-10T03:00:00Z",
+  "payload": {
+    "paymentId": "pay-123",
+    "amount": 15000,
+    "currency": "COP"
+  }
+}
