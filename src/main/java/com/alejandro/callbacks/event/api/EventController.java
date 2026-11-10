@@ -25,10 +25,12 @@ import tools.jackson.databind.json.JsonMapper;
 public class EventController {
   private final EventService service;
   private final JsonMapper mapper;
+  private final ReceiveEventRequest request;
 
-  public EventController(EventService service, JsonMapper mapper) {
+  public EventController(EventService service, JsonMapper mapper, ReceiveEventRequest request) {
     this.service = service;
     this.mapper = mapper;
+    this.request = request;
   }
 
   @PostMapping(path = "/callbacks/{source}", consumes = "application/json")
