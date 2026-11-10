@@ -3,7 +3,12 @@ HELP.md
 .env.*
 .DS_Store
 target/
-.mvn/wrapper/maven-wrapper.jar
+.gradle/
+/gradle/caches/
+/gradle/daemon/
+/gradle/native/
+/gradle/notifications/
+/gradle/wrapper/dists/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
@@ -29,6 +34,7 @@ target/
 /nbdist/
 /.nb-gradle/
 build/
+!gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
 
